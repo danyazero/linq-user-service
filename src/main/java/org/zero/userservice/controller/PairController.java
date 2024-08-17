@@ -1,5 +1,6 @@
 package org.zero.userservice.controller;
 
+import io.swagger.v3.oas.annotations.Parameter;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 import org.zero.userservice.model.FullPairRequest;
@@ -16,7 +17,7 @@ public class PairController {
     @PutMapping
     public String createPair(
             @RequestBody PairRequest pair,
-            @RequestHeader("X-Request-ID") String idempotencyKey,
+            @Parameter(description = "Unique idempotency key") @RequestHeader("X-Request-ID") String idempotencyKey,
             @RequestHeader("X-Issuer-ID") String issuerId
     ) {
         return pairService.createPair(pair, idempotencyKey, issuerId);
@@ -25,7 +26,7 @@ public class PairController {
     @PatchMapping
     public PairResponse createContactPersonAndGetPair(
             @RequestBody FullPairRequest pair,
-            @RequestHeader("X-Request-ID") String idempotencyKey,
+            @Parameter(description = "Unique idempotency key") @RequestHeader("X-Request-ID") String idempotencyKey,
             @RequestHeader("X-Issuer-ID") String issuerId
     ) {
         return pairService.createContactPersonAndGetPair(pair, idempotencyKey, issuerId);

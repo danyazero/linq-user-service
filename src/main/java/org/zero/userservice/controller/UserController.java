@@ -27,7 +27,10 @@ public class UserController {
     @PutMapping
     @Transactional
     @Operation(summary = "Create ContactPerson", description = "Create a ContactPerson for the user whose ID is contained in the “X-Issuer-ID” header.")
-    public UserDataResponse createUser(@RequestBody UserDataRequest userData, @Parameter(description = "Issuer user id") @RequestHeader("X-Issuer-ID") String issuerId) {
+    public UserDataResponse createUser(
+            @RequestBody UserDataRequest userData,
+            @Parameter(description = "Unique idempotency key") @RequestHeader("X-Request-ID") String idempotencyKey,
+            @Parameter(description = "Issuer user id") @RequestHeader("X-Issuer-ID") String issuerId) {
         var userId = uuid.get(issuerId);
         var contactPersonData = new UserData(
                 userData.firstName(),
@@ -36,7 +39,7 @@ public class UserController {
                 userData.phone(),
                 userId
         );
-        return userService.createContactPerson(contactPersonData, userData.idempotencyKey());
+        return userService.createContactPerson(contactPersonData, idempotencyKey);
     }
 
     @DeleteMapping("/{userId}")
