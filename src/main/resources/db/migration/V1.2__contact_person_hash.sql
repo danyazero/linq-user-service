@@ -1,0 +1,1 @@
+ALTER TABLE "public"."contact_person" ADD COLUMN "hash" text NOT NULL default '--';

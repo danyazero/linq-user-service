@@ -1,0 +1,1 @@
+ALTER TABLE "public"."contact_person" ADD COLUMN "created_at" timestamp NOT NULL DEFAULT now();
