@@ -41,8 +41,8 @@ public class ContactPerson {
     @JoinColumn(name = "issuer_user_id")
     private User issuerUser;
 
-    @Column(name = "hash", length = Integer.MAX_VALUE)
-    private String hash;
+    @Column(name = "hash")
+    private Integer hash;
 
     @NotNull
     @ColumnDefault("now()")

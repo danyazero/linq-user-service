@@ -9,9 +9,9 @@ import java.io.Serializable;
 
 @Getter
 @Setter
-@RedisHash(value = "Idempotency", timeToLive = 900)
+@RedisHash(value = "Idempotency", timeToLive = 120)
 public class Idempotency implements Serializable {
     @Id
     private String idempotencyKey;
-    private String idempotencyHash;
+    private Integer idempotencyHash;
 }

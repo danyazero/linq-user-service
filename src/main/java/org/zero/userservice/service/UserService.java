@@ -1,6 +1,7 @@
 package org.zero.userservice.service;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.zero.userservice.entity.ContactPerson;
@@ -8,29 +9,29 @@ import org.zero.userservice.entity.Counterparty;
 import org.zero.userservice.entity.User;
 import org.zero.userservice.exception.AuthException;
 import org.zero.userservice.exception.RequestException;
-import org.zero.userservice.mappers.UserMapper;
 import org.zero.userservice.mappers.RegisterMapper;
+import org.zero.userservice.mappers.UserMapper;
 import org.zero.userservice.model.*;
 import org.zero.userservice.repository.ContactPersonRepository;
 import org.zero.userservice.repository.CounterpartyRepository;
 import org.zero.userservice.repository.UserRepository;
-import org.zero.userservice.utils.*;
+import org.zero.userservice.utils.JWTModule;
+import org.zero.userservice.utils.RequestMetadataStore;
+import org.zero.userservice.utils.SHAEncoder;
+import org.zero.userservice.utils.UUIDProvider;
 
-import java.util.Optional;
-
+@Slf4j
 @Service
 @RequiredArgsConstructor
-public class UserService {
-    private final CounterpartyRepository counterpartyRepository;
+public class UserService implements IUserService {
+    private final RequestMetadataStore requestMetadataStore;
     private final ContactPersonRepository contactPersonRepository;
-    private final IdempotencyProvider idempotencyProvider;
+    private final CounterpartyRepository counterpartyRepository;
     private final UserRepository userRepository;
     private final JWTModule jwtModule;
     private final UUIDProvider uuid;
 
-    public Tokens loginUser(
-            AuthRequest authRequest
-    ) {
+    public Tokens loginUser(AuthRequest authRequest) {
         var passwordHash = SHAEncoder.apply(authRequest.password());
         var user = userRepository.getUserByPhoneAndPasswordIfExists(authRequest.phone(), passwordHash);
         if (user.isEmpty()) throw new AuthException("Incorrect credentials");
@@ -43,9 +44,7 @@ public class UserService {
     }
 
     @Transactional
-    public void register(
-            RegisterRequest registerRequest
-    ) {
+    public void registerUser(RegisterRequest registerRequest) {
         if (!registerRequest.password().equals(registerRequest.passwordRepeat()))
             throw new AuthException("Паролі не співпадають");
 
@@ -60,81 +59,73 @@ public class UserService {
         createContactPerson(userData, counterparty);
     }
 
+    public UserDataResponse createContactPerson(UserDataRequest userDataRequest) {
+        System.out.println(Thread.currentThread().getName());
 
-    public UserDataResponse createContactPerson(
-            UserData userData,
-            String idempotencyKey
-    ) {
-
-        var idempotencyValue = getUserDataIdempotencyValue(userData);
-        var contactPerson = idempotencyCheck(userData, idempotencyKey, idempotencyValue);
-        if (contactPerson.isPresent()) return contactPerson.get();
-
-        var generatedDataHash = SHAEncoder.apply(idempotencyValue, SHAEncoder.Encryption.SHA1);
-        var isAlreadyExist = isContactPersonAlreadyExist(userData, idempotencyKey, generatedDataHash);
-        if (isAlreadyExist.isPresent()) return isAlreadyExist.get();
-
-        var counterparty = getCounterparty(userData.phone());
-        var createdContactPerson = createContactPerson(userData, counterparty, generatedDataHash);
-        idempotencyProvider.save(idempotencyKey, idempotencyValue);
-
+        var counterparty = getCounterparty(userDataRequest.phone());
+        var userDataId = uuid.get(userDataRequest.userId());
+        log.info("({}) Extracted issuer userId -> {}", requestMetadataStore.getRequestId(), userDataId);
+        var userData = UserMapper.map(userDataRequest, userDataId);
+        var createdContactPerson = createContactPerson(
+                userData,
+                counterparty,
+                userDataRequest.hashCode()
+        );
         var userId = uuid.generate(createdContactPerson.getId());
+
         return UserMapper.map(createdContactPerson, userId);
     }
 
-    public String deleteContactPerson(
-            String userId,
-            String issuerId
-    ) {
+
+    public String deleteContactPerson(String userId, String issuerId) {
         var parsedIssuerId = uuid.get(issuerId);
         var parsedUserId = uuid.get(userId);
+        log.info("({}) Parsed userId -> {}, issuerId -> {}", requestMetadataStore.getRequestId(), parsedUserId, parsedIssuerId);
 
         var foundedContactPerson = contactPersonRepository.findFirstByIssuerUser_IdAndAndId(parsedIssuerId, parsedUserId);
         if (foundedContactPerson.isPresent()) {
+            log.info("({}) Contact person founded, removing it", requestMetadataStore.getRequestId());
             contactPersonRepository.delete(foundedContactPerson.get());
             return userId;
         }
+        log.info("({}) Contact person not found, couldn't removing it", requestMetadataStore.getRequestId());
         throw new RequestException("Щось пішло не так.");
     }
 
-
-    private ContactPerson createContactPerson(
+    private void createContactPerson(
             UserData userData,
             Counterparty counterparty
     ) {
-        var generatedDataHash = SHAEncoder.apply(getUserDataIdempotencyValue(userData), SHAEncoder.Encryption.SHA1);
-        return createContactPerson(userData, counterparty, generatedDataHash);
+        createContactPerson(userData, counterparty, userData.hashCode());
     }
 
-    private Optional<UserDataResponse> isContactPersonAlreadyExist(
-            UserData userData,
-            String idempotencyKey,
-            String generatedDataHash
-    ) {
-        var isAlreadyExist = contactPersonRepository.findFirstByIssuerUser_IdAndHash(userData.userId(), generatedDataHash);
-        if (isAlreadyExist.isPresent()) {
-            idempotencyProvider.saveWithHash(idempotencyKey, generatedDataHash);
-            var userId = uuid.generate(isAlreadyExist.get().getId());
-            return Optional.of(UserMapper.map(isAlreadyExist.get(), userId));
+    private ContactPerson createContactPerson(UserData userData, Counterparty counterparty, Integer userDataHash) {
+        var createdContactPerson = contactPersonRepository.getUserByPhoneAndIssuerIdAndHash(
+                userData.phone(),
+                counterparty.getId(),
+                userDataHash
+        );
+        if (createdContactPerson.isPresent()) {
+
+            log.info("Contact person for this issuer with similar data already exists -> {}", createdContactPerson.get().getId());
+            return createdContactPerson.get();
         }
-        return Optional.empty();
-    }
 
-    private ContactPerson createContactPerson(
-            UserData userData,
-            Counterparty counterparty,
-            String userDataHash
-    ) {
         var issuer = userRepository.getReferenceById(userData.userId());
-        var newContactPerson = UserMapper.map(userData, counterparty, issuer, userDataHash);
+        var newContactPerson = UserMapper.map(
+                userData,
+                counterparty,
+                issuer,
+                userDataHash
+        );
+        log.info("Contact person for this issuer was created");
 
         return contactPersonRepository.save(newContactPerson);
     }
 
-    private Counterparty getCounterparty(
-            String phone
-    ) {
+    private Counterparty getCounterparty(String phone) {
         var counterparty = counterpartyRepository.getFirstByPhone(phone);
+
         return counterparty.orElseGet(() -> createCounterparty(phone));
     }
 
@@ -144,46 +135,20 @@ public class UserService {
         return counterpartyRepository.save(newCounterparty);
     }
 
-    private static String getUserDataIdempotencyValue(
-            UserData userData
-    ) {
-        return IdempotencyValueProvider.generate(userData.firstName(), userData.lastName(), userData.middleName(), userData.phone());
-    }
-
-    private Optional<UserDataResponse> idempotencyCheck(
-            UserData userData,
-            String idempotencyKey,
-            String idempotencyValue
-    ) {
-        var idempotency = idempotencyProvider.check(idempotencyKey, idempotencyValue);
-
-        if (idempotency.exist()) {
-            if (idempotency.equals()) {
-                ContactPerson existedContactPerson = tryGetContactPerson(userData, idempotencyKey);
-
-                var userId = uuid.generate(existedContactPerson.getId());
-                return Optional.of(UserMapper.map(existedContactPerson, userId));
-            } else throw new RequestException("Особу було створено із іншими даними.");
-        }
-        return Optional.empty();
-    }
-
-    private ContactPerson tryGetContactPerson(
-            UserData userData,
-            String idempotencyKey
-    ) {
-        try {
-            return contactPersonRepository.getUserByPhoneAndIssuerId(userData.phone(), userData.userId()).getFirst();
-        } catch (Exception e) {
-            idempotencyProvider.delete(idempotencyKey);
-            throw new RequestException("Особу не знайдено. Спробуйте пізніше.");
-        }
-    }
-
     private User saveNewUser(RegisterRequest registerRequest, Counterparty counterparty) {
         User newUser = new User();
         newUser.setCounterparty(counterparty);
         newUser.setPassword(SHAEncoder.apply(registerRequest.password()));
+
         return userRepository.save(newUser);
+    }
+
+    private static void method(String message) {
+        System.out.println(message);
+    }
+
+    @Override
+    public Chain next(Chain chain) {
+        return this;
     }
 }

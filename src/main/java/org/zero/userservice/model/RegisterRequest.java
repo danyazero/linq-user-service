@@ -1,10 +1,14 @@
 package org.zero.userservice.model;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import org.hibernate.validator.constraints.Length;
+import org.zero.userservice.utils.SHAEncoder;
 
 public record RegisterRequest(
+        @JsonProperty("_IK")
+        String idempotencyKey,
         @NotBlank
         @Length(min = 2, max = 64, message = "Некорректна довжина імені")
 //        @Pattern(regexp = "\s+", message = "Імʼя може містити лише українські літери")

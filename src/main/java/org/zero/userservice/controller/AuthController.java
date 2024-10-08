@@ -3,9 +3,11 @@ package org.zero.userservice.controller;
 import lombok.AllArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 import org.zero.userservice.exception.AuthException;
-import org.zero.userservice.model.*;
+import org.zero.userservice.model.AuthRequest;
+import org.zero.userservice.model.RegisterRequest;
+import org.zero.userservice.model.Tokens;
+import org.zero.userservice.model.IUserService;
 import org.zero.userservice.repository.UserRepository;
-import org.zero.userservice.service.UserService;
 import org.zero.userservice.utils.JWTModule;
 import org.zero.userservice.utils.UUIDProvider;
 
@@ -17,7 +19,7 @@ import org.zero.userservice.utils.UUIDProvider;
 public class AuthController {
     private final UUIDProvider uuid;
     private final JWTModule jwtModule;
-    private final UserService userService;
+    private final IUserService userService;
     private final UserRepository userRepository;
 
     @PostMapping
@@ -27,7 +29,7 @@ public class AuthController {
 
     @PutMapping
     public void register(@RequestBody RegisterRequest userData) {
-        userService.register(userData);
+        userService.registerUser(userData);
     }
 
     @GetMapping("/{token}")
